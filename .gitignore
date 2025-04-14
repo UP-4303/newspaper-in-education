@@ -1,0 +1,6 @@
+venv
+__pycache__
+debug
+gdelt_compressed
+gdelt_files
+articles
