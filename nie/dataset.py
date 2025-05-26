@@ -1,10 +1,18 @@
-from gdelt.ArticleDataArray import ArticleData, ArticleDataArray
-from articleContent.ArticleContent import ArticleContent
-from typing import List, Literal, OrderedDict
+import asyncio
+import datetime
+from typing import List
+from tqdm.asyncio import tqdm_asyncio
 import json
 import readability
-
 from pydantic import BaseModel, ConfigDict
+
+from gdelt.ArticleDataArray import ArticleData, ArticleDataArray
+from articleContent.ArticleContent import ArticleContent
+import asyncioConfig as asyncC
+from articleContent.ArticleConsumer import ArticleConsumer
+from gdelt.GdeltConsumer import GdeltConsumer
+from requestsConfig import GetSession
+from gdelt.config import formattedDate
 
 class ReadabilityGrades(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -152,6 +160,10 @@ class Article(BaseModel):
     readability: ReadabilityScores
 
 class Dataset:
+    session = GetSession()
+    gdeltConsumer = GdeltConsumer.getConsumer(session)
+    articleConsumer = ArticleConsumer.getConsumer(session)
+
     def __init__(self, data: List[Article]):
 
         if not all(isinstance(item, Article) for item in data):
@@ -201,3 +213,35 @@ class Dataset:
                     readability= ReadabilityScores.fromReadability(readability.getmeasures('\n'.join(articleContent.content)))
                 ))
         return cls(articles)
+    
+    @classmethod
+    async def contentFromData(cls, articleData):
+        return (await cls.articleConsumer.retrieveArticleContent(articleData)).clean()
+    
+    @classmethod
+    async def partialFromDate(cls, targetDate: datetime.datetime):
+        articleDataArray = (await cls.gdeltConsumer.retrieveJsonGz(targetDate)).uncompress().clean()
+        
+        if articleDataArray == []:
+            return (articleDataArray, [])
+
+        articleContentTaskArray = [asyncC.createTask(cls.contentFromData(articleData), name=f'article-{formattedDate(targetDate)}-{i}') for i, articleData in enumerate(articleDataArray)]
+
+        partial = (articleDataArray, await asyncio.gather(*articleContentTaskArray))
+        
+        return partial
+    
+    @classmethod
+    async def fromTargetDates(cls, targetDates: List[datetime.datetime]= [datetime.datetime(2020, 1, 1, h, m, 0) for h in range(24) for m in range(60)])-> 'Dataset':
+        dataset = cls([])
+
+        partialTaskArray = [asyncC.createTask(cls.partialFromDate(targetDate), name=f'gdelt-{formattedDate(targetDate)}') for targetDate in targetDates]
+
+        partials = await tqdm_asyncio.gather(*partialTaskArray)
+        
+        for articleDataArray, articleContentArray in partials:
+            dataset.extend(cls.fromPartial(articleDataArray, articleContentArray))
+        print('download finished')
+        dataset.save(f'../dataset/2020-01-01-{len(dataset)}.json')
+        print('saved')
+        return dataset
