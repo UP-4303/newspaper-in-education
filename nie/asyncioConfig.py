@@ -1,7 +1,7 @@
 import asyncio
 import traceback
 
-# Not sure if that part works
+# Not sure if the loop part works
 def loopExceptionHandler(loop, context):
     print("Asyncio Exception:", context.get("exception", context["message"]))
 
@@ -20,3 +20,10 @@ def createTask(coro, name=None):
     task = asyncio.create_task(coro, name=name)
     task.add_done_callback(lambda t: exceptionHandler(t, coro))
     return task
+
+# Task utils
+def allTasks():
+    return asyncio.all_tasks()
+
+def taskKiller():
+    [task.cancel() for task in allTasks()]
