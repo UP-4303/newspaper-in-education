@@ -12,11 +12,13 @@ class ArticleConsumer:
     semaphoreHost = defaultdict(lambda: asyncio.Semaphore(8))
     maxRetries = 3
     maxDelay = 30
+
+    instances = {}
     
     def __init__(self, session: aiohttp.ClientSession, verbose: bool= False):
         self.session = session
+        self.verbose = verbose
         open('error.txt', mode='w').close() # Empty the file on init
-
 
     def emptyArticleContent(self, id):
         return ArticleRawContent('', id)
@@ -102,8 +104,13 @@ class ArticleConsumer:
     async def retrieveArticlesContent(self, articleDataArray: ArticleDataArray):
         return await asyncio.gather(*[self.retrieveArticleContent(gdeltData) for gdeltData in articleDataArray])
     
-    @staticmethod
-    async def log(message):
-        if verbose:
+    async def log(self, message):
+        if self.verbose:
             async with aiofiles.open('error.txt', mode='a') as f:
                 await f.write(message + '\n')
+
+    @classmethod
+    def getConsumer(cls, session):
+        if not session in cls.instances:
+            cls.instances[session] = cls(session)
+        return cls.instances[session]

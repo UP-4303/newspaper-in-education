@@ -7,6 +7,8 @@ from gdelt.GdeltJsonGz import GdeltJsonGz
 class GdeltConsumer:
     semaphore = asyncio.Semaphore(30)
 
+    instances = {}
+
     def __init__(self, session):
         self.session = session
 
@@ -15,3 +17,9 @@ class GdeltConsumer:
             async with self.session.get(config.url(requestTime)) as response:
                 content = await response.read()
         return GdeltJsonGz(content, requestTime)
+    
+    @classmethod
+    def getConsumer(cls, session):
+        if not session in cls.instances:
+            cls.instances[session] = cls(session)
+        return cls.instances[session]
