@@ -5,9 +5,10 @@ from tqdm import tqdm
 import models.config as config
 from dataset import Dataset, Article
 from models.VectorizerInterface import VectorizerInterface
+from models.ClassifierInterface import ClassifierInterface
 import readabilityFormulas
 
-class NieSVM:
+class NieSVM(ClassifierInterface):
     def __init__(self, clf: svm.SVC, vectorizer: VectorizerInterface):
         self.clf = clf
         self.vectorizer = vectorizer
