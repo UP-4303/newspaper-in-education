@@ -4,21 +4,15 @@
 #%%
 import datetime
 import matplotlib.pyplot as plt
-import asyncio
-from tqdm.asyncio import tqdm_asyncio
 from tqdm import tqdm
 import numpy as np
 
 import asyncioConfig as asyncC
+from models.ClassifierInterface import ClassifierInterface
 from requestsConfig import GetSession
-from gdelt.config import formattedDate
 from gdelt.GdeltConsumer import GdeltConsumer
-from gdelt.ArticleDataArray import ArticleDataArray
 from articleContent.ArticleConsumer import ArticleConsumer
-from articleContent.ArticleContent import ArticleContent
 from dataset import Dataset
-from models.NieDoc2Vec import NieDoc2Vec
-from models.NieSVM import NieSVM
 import readabilityFormulas
 
 # %%
@@ -47,12 +41,12 @@ def TrainingDataset(fromDataset, lineCount):
         i+=1
     return trainingDataset
 
-def Predict(dataset, nieSVM):
+def Predict(dataset: Dataset, classifier: ClassifierInterface):
     correct = 0
     error = 0
     for article in tqdm(dataset):
         actual = readabilityFormulas.FleschLabel(article.readability.readabilityGrades.flesch)
-        prediction = round(np.mean(nieSVM.predict(article)))
+        prediction = round(np.mean(classifier.predict(article)))
         if(prediction == actual):
             correct += 1
         error += abs(actual - prediction)
