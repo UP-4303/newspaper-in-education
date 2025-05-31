@@ -20,3 +20,20 @@ def FleschLabel(flesch: float):
         return 8 # Professional
     else:
         return 9 # Irrelevant
+    
+def cefr(cefrLevel: str) -> int:
+    cefrLevel = cefrLevel.upper()
+    if cefrLevel == "A1":
+        return 0
+    elif cefrLevel == "A2":
+        return 1
+    elif cefrLevel == "B1":
+        return 2
+    elif cefrLevel == "B2":
+        return 3
+    elif cefrLevel == "C1":
+        return 4
+    elif cefrLevel == "C2":
+        return 5  # College+
+    else:
+        return 6 # Irrelevant
