@@ -1,5 +1,6 @@
 from gensim.models.doc2vec import Doc2Vec, TaggedDocument
 from gensim.utils import simple_preprocess
+import numpy as np
 
 import models.config as config
 from models.VectorizerInterface import VectorizerInterface
@@ -32,7 +33,7 @@ class NieDoc2Vec(VectorizerInterface):
         return datasetTokens
     
     def articleToVector(self, article: Article):
-        return [self.model.infer_vector(line) for line in self.__class__.readCorpus(article, 0)[0]]
+        return np.array([self.model.infer_vector(line) for line in self.__class__.readCorpus(article, 0)[0]])
 
     @classmethod
     def trainFromDataset(cls, dataset: Dataset, vectorSize= 100, epochs= 10):
