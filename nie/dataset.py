@@ -14,6 +14,9 @@ from gdelt.GdeltConsumer import GdeltConsumer
 from requestsConfig import GetSession
 from gdelt.config import formattedDate
 
+datasetFolder = '../dataset/'
+datasetPath = lambda name: datasetFolder + name
+
 class ReadabilityGrades(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -190,14 +193,14 @@ class Dataset:
     def __getattr__(self, attr):
         return getattr(self._data, attr)
 
-    def save(self, path: str)-> 'Dataset':
-        with open(path, 'w', encoding='utf-8') as f:
+    def save(self, name: str, path=datasetPath)-> 'Dataset':
+        with open(path(name), 'w', encoding='utf-8') as f:
             json.dump([article.model_dump() for article in self._data], f, ensure_ascii=False, indent=4)
         return self
 
     @classmethod
-    def load(cls, path: str) -> 'Dataset':
-        with open(path, 'r', encoding='utf-8') as f:
+    def load(cls, name: str, path=datasetPath) -> 'Dataset':
+        with open(path(name), 'r', encoding='utf-8') as f:
             data = json.load(f)
             articles = [Article.model_validate(item) for item in data]
         return cls(articles)
