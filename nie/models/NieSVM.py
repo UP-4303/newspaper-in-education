@@ -6,7 +6,7 @@ import models.config as config
 from dataset import Dataset, Article
 from models.VectorizerInterface import VectorizerInterface
 from models.ClassifierInterface import ClassifierInterface
-import readabilityFormulas
+import labelFormulas
 
 class NieSVM(ClassifierInterface):
     def __init__(self, clf: svm.SVC, vectorizer: VectorizerInterface):
@@ -18,9 +18,11 @@ class NieSVM(ClassifierInterface):
         vectors = []
         classifications = []
         for article in tqdm(dataset):
-            for vector in vectorizer.articleToVector(article):
-                vectors.append(vector)
-                classifications.append(readabilityFormulas.FleschLabel(article.readability.readabilityGrades.flesch))
+            label = labelFormulas.fleschKincaidLabel(article.readability.readabilityGrades.kincaid)
+            if label != None:
+                for vector in vectorizer.articleToVector(article):
+                    vectors.append(vector)
+                    classifications.append(label)
 
         clf = svm.SVC()
         clf.fit(vectors, classifications)
