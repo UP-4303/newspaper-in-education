@@ -3,6 +3,7 @@
 #%autoreload 2
 #%%
 import datetime
+import math
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 import numpy as np
@@ -13,7 +14,7 @@ from requestsConfig import GetSession
 from gdelt.GdeltConsumer import GdeltConsumer
 from articleContent.ArticleConsumer import ArticleConsumer
 from dataset import Dataset
-import readabilityFormulas
+import labelFormulas
 
 # %%
 targetDate = datetime.datetime(2020, 1, 1, 0, 1, 0)
@@ -41,16 +42,19 @@ def TrainingDataset(fromDataset, lineCount):
         i+=1
     return trainingDataset
 
-def Predict(dataset: Dataset, classifier: ClassifierInterface):
+def Predict(dataset: Dataset, classifier: ClassifierInterface, labels: list[int]):
     correct = 0
     error = 0
-    for article in tqdm(dataset):
-        actual = readabilityFormulas.FleschLabel(article.readability.readabilityGrades.flesch)
+    squaredError = 0
+    for i, article in enumerate(tqdm(dataset)):
+        actual = labels[i]
         prediction = round(np.mean(classifier.predict(article)))
         if(prediction == actual):
             correct += 1
         error += abs(actual - prediction)
+        squaredError += abs(actual - prediction)**2
     print(f'Correct predictions {correct}/{len(dataset)}, {(correct/len(dataset))*100}%')
     print(f'Error {error}, mean error {error/len(dataset)}')
+    print(f'Root Mean Square Error {math.sqrt(squaredError/len(dataset))}')
 
 # %%
