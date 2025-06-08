@@ -1,6 +1,7 @@
 import asyncio
 import datetime
 from typing import List
+import pandas
 from tqdm.asyncio import tqdm_asyncio
 import json
 import readability
@@ -11,6 +12,7 @@ from articleContent.ArticleContent import ArticleContent
 import asyncioConfig as asyncC
 from articleContent.ArticleConsumer import ArticleConsumer
 from gdelt.GdeltConsumer import GdeltConsumer
+from htmlParser import splitIntoSentences
 from requestsConfig import GetSession
 from gdelt.config import formattedDate
 
@@ -141,10 +143,10 @@ class SentenceBeginnings(BaseModel):
 class ReadabilityScores(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    readabilityGrades: ReadabilityGrades
-    sentenceInfo: SentenceInfo
-    wordUsage: WordUsage
-    sentenceBeginnings: SentenceBeginnings
+    readabilityGrades: ReadabilityGrades | None = None
+    sentenceInfo: SentenceInfo | None = None
+    wordUsage: WordUsage | None = None
+    sentenceBeginnings: SentenceBeginnings | None = None
 
     @classmethod
     def fromReadability(cls, readabilityData):
@@ -154,13 +156,24 @@ class ReadabilityScores(BaseModel):
             wordUsage= WordUsage.fromReadability(readabilityData['word usage']),
             sentenceBeginnings= SentenceBeginnings.fromReadability(readabilityData['sentence beginnings'])
         )
+    
+class ClearScores(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    clearScore1: float
+    clearScore2: float
+    clearScore3: float
+    clearScore4: float
+    clearScore5: float
+    clearScore6: float
 
 class Article(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     content: List[str]
-    data: ArticleData
-    readability: ReadabilityScores
+    data: ArticleData | None = None
+    readability: ReadabilityScores | None = None
+    clearScores: ClearScores | None = None
 
 class Dataset:
     session = GetSession()
@@ -247,4 +260,28 @@ class Dataset:
         print('download finished')
         dataset.save(f'../dataset/2020-01-01-{len(dataset)}.json')
         print('saved')
+        return dataset
+    
+    @classmethod
+    def fromClearCorpus(cls, path: str):
+        clearCorpus = pandas.read_csv(path, sep= ',', header=0)
+
+        articles = [Article(
+            content=splitIntoSentences([row[0]]),
+            clearScores= ClearScores(
+                clearScore1= row[1],
+                clearScore2= row[2],
+                clearScore3= row[3],
+                clearScore4= row[4],
+                clearScore5= row[5],
+                clearScore6= row[6]
+            ),
+            readability= ReadabilityScores(
+                readabilityGrades= ReadabilityGrades(
+                    kincaid= row[7]
+                )
+            )
+        ) for row in clearCorpus[['Excerpt', 'firstPlace_pred', 'secondPlace_pred', 'thirdPlace_pred', 'fourthPlace_pred', 'fifthPlace_pred', 'sixthPlace_pred', 'Flesch-Kincaid-Grade-Level']].to_numpy()]
+
+        dataset = cls(articles)
         return dataset
