@@ -14,17 +14,8 @@ from requestsConfig import GetSession
 from gdelt.GdeltConsumer import GdeltConsumer
 from articleContent.ArticleConsumer import ArticleConsumer
 from dataset import Dataset
-import labelFormulas
 
 # %%
-targetDate = datetime.datetime(2020, 1, 1, 0, 1, 0)
-pathUncleanedTest1 = '../dataset/test1-uncleaned.json'
-pathTest1 = '../dataset/test1.json'
-pathUncleanedTest2 = '../dataset/test2-uncleaned.json'
-pathTest2 = '../dataset/test2.json'
-nieDoc2VecName = 'test2-0-6000'
-nieSVMName = 'test2-0-6000'
-
 # Dependencies setup
 session = GetSession()
 gdeltConsumer = GdeltConsumer.getConsumer(session)
@@ -32,7 +23,7 @@ articleConsumer = ArticleConsumer.getConsumer(session)
 asyncC.asyncioSetup()
 
 # Splits a dataset to have at least lineCount lines, rounded up by one article
-def TrainingDataset(fromDataset, lineCount):
+def TrainingDataset(fromDataset: Dataset, lineCount: int):
     trainingDataset = Dataset([])
     lines = 0
     i = 0
@@ -48,6 +39,8 @@ def Predict(dataset: Dataset, classifier: ClassifierInterface, labels: list[int]
     squaredError = 0
     for i, article in enumerate(tqdm(dataset)):
         actual = labels[i]
+        if actual == None:
+            continue
         prediction = round(np.mean(classifier.predict(article)))
         if(prediction == actual):
             correct += 1
