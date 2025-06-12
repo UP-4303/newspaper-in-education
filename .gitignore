@@ -15,5 +15,6 @@ article_content
 dataset
 nie_doc2vec_model
 nie_svm_model
+nie_bert_model
 
 error.txt
