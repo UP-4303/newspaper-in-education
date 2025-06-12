@@ -2,10 +2,12 @@ import asyncio
 import datetime
 from typing import List
 import pandas
+import torch
 from tqdm.asyncio import tqdm_asyncio
 import json
 import readability
 from pydantic import BaseModel, ConfigDict
+from torch.utils.data import Dataset as TorchDataset
 
 from gdelt.ArticleDataArray import ArticleData, ArticleDataArray
 from articleContent.ArticleContent import ArticleContent
@@ -285,3 +287,20 @@ class Dataset:
 
         dataset = cls(articles)
         return dataset
+    
+class TorchDatasetWrapper(TorchDataset):
+    def __init__(self, dataset: Dataset, labels: List[int], tokenizer):
+        self.dataset = dataset
+        self.labels = labels
+        self.tokenizer = tokenizer
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        article = self.dataset[idx]
+        text = " ".join(article.content)
+        encoding = self.tokenizer(text, truncation=True, padding='max_length', max_length=512)
+        item = {key: torch.tensor(val) for key, val in encoding.items()}
+        item["labels"] = torch.tensor(self.labels[idx], dtype=torch.long)
+        return item
