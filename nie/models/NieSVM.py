@@ -12,6 +12,10 @@ class NieSVM(ClassifierInterface):
     def __init__(self, clf: svm.SVC, vectorizer: VectorizerInterface):
         self.clf = clf
         self.vectorizer = vectorizer
+
+    @classmethod
+    def getLabels(self, dataset: Dataset):
+        return [labelFormulas.fleschKincaidLabel(article.readability.readabilityGrades.kincaid) for article in dataset if article.readability.readabilityGrades.kincaid != None]
     
     @classmethod
     def trainFromDataset(cls, vectorizer: VectorizerInterface, dataset: Dataset):
