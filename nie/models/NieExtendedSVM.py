@@ -23,7 +23,7 @@ class NieExtendedSVM(NieSVM):
 
     @classmethod
     def getLabels(cls, dataset: Dataset):
-        labels = KMeans.getLabels(dataset, scoresFromArticle)
+        labels = KMeans.getLabels(dataset, cls.nClusters, scoresFromArticle)
         return labels
 
     @classmethod
