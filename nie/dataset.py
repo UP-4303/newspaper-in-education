@@ -162,6 +162,8 @@ class ReadabilityScores(BaseModel):
 class ClearScores(BaseModel):
     model_config = ConfigDict(frozen=True)
 
+    btEasiness: float
+    btStandardError: float
     clearScore1: float
     clearScore2: float
     clearScore3: float
@@ -271,28 +273,38 @@ class Dataset:
         articles = [Article(
             content=splitIntoSentences([row[0]]),
             clearScores= ClearScores(
-                clearScore1= row[1],
-                clearScore2= row[2],
-                clearScore3= row[3],
-                clearScore4= row[4],
-                clearScore5= row[5],
-                clearScore6= row[6]
+                btEasiness= row[1],
+                btStandardError= row[2],
+                clearScore1= row[3],
+                clearScore2= row[4],
+                clearScore3= row[5],
+                clearScore4= row[6],
+                clearScore5= row[7],
+                clearScore6= row[8]
             ),
             readability= ReadabilityScores(
                 readabilityGrades= ReadabilityGrades(
-                    kincaid= row[7]
+                    kincaid= row[9]
                 )
             )
-        ) for row in clearCorpus[['Excerpt', 'firstPlace_pred', 'secondPlace_pred', 'thirdPlace_pred', 'fourthPlace_pred', 'fifthPlace_pred', 'sixthPlace_pred', 'Flesch-Kincaid-Grade-Level']].to_numpy()]
+        ) for row in clearCorpus[['Excerpt', 'BT Easiness', 'BT s.e.', 'firstPlace_pred', 'secondPlace_pred', 'thirdPlace_pred', 'fourthPlace_pred', 'fifthPlace_pred', 'sixthPlace_pred', 'Flesch-Kincaid-Grade-Level']].to_numpy()]
 
         dataset = cls(articles)
         return dataset
     
 class TorchDatasetWrapper(TorchDataset):
-    def __init__(self, dataset: Dataset, labels: List[int], tokenizer):
+    def __init__(self, dataset: Dataset, labels: List[int|float], tokenizer, weights: List[float]):
         self.dataset = dataset
         self.labels = labels
         self.tokenizer = tokenizer
+        if not weights:
+            self.weights = [1]*len(dataset)
+        else:
+            self.weights = weights
+        if not self.labels:
+            self.regression = False
+        else:
+            self.regression = isinstance(self.labels[0], float)
 
     def __len__(self):
         return len(self.dataset)
@@ -301,6 +313,10 @@ class TorchDatasetWrapper(TorchDataset):
         article = self.dataset[idx]
         text = " ".join(article.content)
         encoding = self.tokenizer(text, truncation=True, padding='max_length', max_length=512)
+        
         item = {key: torch.tensor(val) for key, val in encoding.items()}
-        item["labels"] = torch.tensor(self.labels[idx], dtype=torch.long)
+        
+        item['labels'] = torch.tensor(self.labels[idx], dtype=(torch.float if self.regression else torch.long))
+        item['weights'] = torch.tensor(self.weights[idx], dtype=torch.float)
+        
         return item
