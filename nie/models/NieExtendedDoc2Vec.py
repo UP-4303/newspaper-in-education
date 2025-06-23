@@ -2,7 +2,7 @@ import numpy as np
 
 from models.NieDoc2Vec import NieDoc2Vec
 from dataset import Article
-from nie import CefrCsv
+from CefrCsv import CefrCsv
 
 class NieExtendedDoc2Vec(NieDoc2Vec):
     def articleToVector(self, article: Article):
