@@ -16,7 +16,7 @@ class CefrCsv:
     
     @classmethod
     def countCefr(cls, article: Article):
-        cefrDict = CefrCsv.getAsDict()
+        cefrDict = cls.getAsDict()
 
         retrieved = {
             'A1':0,
