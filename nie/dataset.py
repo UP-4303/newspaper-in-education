@@ -2,12 +2,15 @@ import asyncio
 import datetime
 from typing import List
 import pandas
+from sklearn.neighbors import NearestNeighbors
 import torch
+from tqdm import tqdm
 from tqdm.asyncio import tqdm_asyncio
 import json
 import readability
 from pydantic import BaseModel, ConfigDict
 from torch.utils.data import Dataset as TorchDataset
+from transformers import AutoModel, AutoTokenizer
 
 from gdelt.ArticleDataArray import ArticleData, ArticleDataArray
 from articleContent.ArticleContent import ArticleContent
@@ -15,6 +18,7 @@ import asyncioConfig as asyncC
 from articleContent.ArticleConsumer import ArticleConsumer
 from gdelt.GdeltConsumer import GdeltConsumer
 from htmlParser import splitIntoSentences
+from models import ClassifierInterface
 from requestsConfig import GetSession
 from gdelt.config import formattedDate
 
@@ -287,31 +291,102 @@ class Dataset:
                     kincaid= row[9]
                 )
             )
-        ) for row in clearCorpus[['Excerpt', 'BT Easiness', 'BT s.e.', 'firstPlace_pred', 'secondPlace_pred', 'thirdPlace_pred', 'fourthPlace_pred', 'fifthPlace_pred', 'sixthPlace_pred', 'Flesch-Kincaid-Grade-Level']].to_numpy()]
+        ) for row in clearCorpus[['Excerpt', 'BT Easiness', 'BT s.e.', 'firstPlace_pred', 'secondPlace_pred', 'thirdPlace_pred', 'fourthPlace_pred', 'fifthPlace_pred', 'sixthPlace_pred', 'Flesch-Kincaid-Grade-Level']].to_numpy()
+        if row[2] != 0] # Likely to be an error
 
         dataset = cls(articles)
         return dataset
     
 class TorchDatasetWrapper(TorchDataset):
-    def __init__(self, dataset: Dataset, labels: List[int|float], tokenizer, weights: List[float]):
+    def __init__(self, dataset: List[str|List[str]], labels: List[int|float], weights: List[float], tokenizer):
         self.dataset = dataset
         self.labels = labels
+        self.weights = weights
         self.tokenizer = tokenizer
-        if not weights:
-            self.weights = [1]*len(dataset)
-        else:
-            self.weights = weights
+
         if not self.labels:
             self.regression = False
         else:
             self.regression = isinstance(self.labels[0], float)
 
+    @classmethod
+    def fromDataset(cls, dataset: Dataset, labels: List[int|float], tokenizer, weights: List[float] | None = None, splitAsSentences: bool= False):
+        if not weights:
+            weights = [1]*len(dataset)
+
+        if splitAsSentences:
+            extendedDataset = []
+            extendedLabels = []
+            extendedWeights = []
+            for article, label, weight in zip(dataset, labels, weights):
+                extendedDataset.extend(article.content)
+                extendedLabels.extend([label]*len(article.content))
+                extendedWeights.extend([weight]*len(article.content))
+            this = cls(extendedDataset, extendedLabels, extendedWeights, tokenizer)
+        else:
+            this = cls([article.content for article in dataset], labels, weights, tokenizer)
+
+        return this
+
+    def addPseudoLabeledData(self, externalDataPath: str, trainedModel: ClassifierInterface, embeddingModelName: str= 'sentence-transformers/all-MiniLM-L6-v2', nNeighbors: int= 5):
+        externalData = pandas.read_csv(externalDataPath, sep= ',', header=0)
+        externalSentences = [sentence for row in externalData[['external_text']].to_numpy() if isinstance(row[0], str) for sentence in splitIntoSentences([row[0].replace('\n', ' ')])]
+        
+        tokenizer = AutoTokenizer.from_pretrained(embeddingModelName)
+
+        if isinstance(self.dataset[0], list):
+            labeledSentences = []
+            for article in self.dataset:
+                labeledSentences.extend(article)
+        else:
+            labeledSentences = self.dataset
+
+        embeddingModel = AutoModel.from_pretrained(embeddingModelName)
+        embeddingModel.eval()
+
+        externalEmbeddings = []
+        with torch.no_grad():
+            for i in tqdm(range(len(externalSentences))):
+                tokens = tokenizer(externalSentences[i], return_tensors="pt", padding=True, truncation=True, max_length=512)
+                tokens = {k: v.to(embeddingModel.device) for k, v in tokens.items()}
+                outputs = embeddingModel(**tokens)
+                externalEmbeddings.append(outputs.last_hidden_state[:, 0, :])
+
+        externalEmbeddings = torch.cat(externalEmbeddings).cpu().numpy()
+
+        labeledEmbeddings = []
+        with torch.no_grad():
+            for i in tqdm(range(len(labeledSentences))):
+                tokens = tokenizer(labeledSentences[i], return_tensors="pt", padding=True, truncation=True, max_length=512)
+                tokens = {k: v.to(embeddingModel.device) for k, v in tokens.items()}
+                outputs = embeddingModel(**tokens)
+                labeledEmbeddings.append(outputs.last_hidden_state[:, 0, :])
+
+        labeledEmbeddings = torch.cat(labeledEmbeddings).cpu().numpy()
+
+        index = NearestNeighbors(n_neighbors=nNeighbors, metric='cosine')
+        index.fit(labeledEmbeddings)
+
+        indices = index.kneighbors(externalEmbeddings, n_neighbors=nNeighbors, return_distance=False)
+        filtered = [externalSentences[i] for neighbors in indices for i in neighbors]
+
+        for sentence in tqdm(filtered):
+            if isinstance(self.dataset[0], list):
+                self.dataset.append([sentence])
+            else:
+                self.dataset.append(sentence)
+            self.labels.append(trainedModel.predictSentence(sentence))
+            self.weights.append(0.5)
+            
+        return
+
     def __len__(self):
         return len(self.dataset)
 
     def __getitem__(self, idx):
-        article = self.dataset[idx]
-        text = " ".join(article.content)
+        text = self.dataset[idx]
+        if isinstance(text, list):
+            text = " ".join(text)
         encoding = self.tokenizer(text, truncation=True, padding='max_length', max_length=512)
         
         item = {key: torch.tensor(val) for key, val in encoding.items()}
@@ -320,3 +395,18 @@ class TorchDatasetWrapper(TorchDataset):
         item['weights'] = torch.tensor(self.weights[idx], dtype=torch.float)
         
         return item
+    
+    def save(self, name: str, path=datasetPath)-> 'Dataset':
+        with open(path(name), 'w', encoding='utf-8') as f:
+            json.dump({'content': self.dataset, 'labels': self.labels, 'weights': self.weights}, f, ensure_ascii=False, indent=4)
+        return self
+
+    @classmethod
+    def load(cls, name: str, tokenizer, path=datasetPath) -> 'Dataset':
+        with open(path(name), 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            dataset = data['content']
+            labels = data['labels']
+            weights = data['weights']
+        this = cls(dataset, labels, weights, tokenizer)
+        return this

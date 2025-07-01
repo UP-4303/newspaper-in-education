@@ -2,7 +2,7 @@ from typing import List
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, WeightedRandomSampler
-from transformers import AutoTokenizer, AutoModelForSequenceClassification, Trainer, TrainingArguments
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, Trainer, TrainingArguments, EarlyStoppingCallback
 
 from models import config
 from models.ClassifierInterface import ClassifierInterface
@@ -39,7 +39,7 @@ class WeightedTrainer(Trainer):
             num_workers=self.args.dataloader_num_workers,
         )
     
-    def compute_loss(self, model, inputs, num_items_in_batch=None):
+    def compute_loss(self, model, inputs, num_items_in_batch= None, return_outputs= False):
         weights = inputs.pop("weights", None)  # remove weights so model.forward doesn't get them
         labels = inputs["labels"]
 
@@ -58,7 +58,10 @@ class WeightedTrainer(Trainer):
             losses = losses * weights
 
         loss = losses.mean()
-        return loss
+        if return_outputs:
+            return loss, outputs
+        else:
+            return loss
 
 class NieBert(ClassifierInterface):
     nClusters = 10
@@ -91,21 +94,50 @@ class NieBert(ClassifierInterface):
             for e in standardErrors
         ]
         return weights
+    
+    def retrain(self, dataset: TorchDatasetWrapper, evalDataset: TorchDatasetWrapper, **kwargs):
+        args = {
+            'output_dir': f"../output/{self.model.config._name_or_path.replace('/','-')}",
+            'logging_steps': 50,
+
+            'num_train_epochs': 3,
+            'per_device_train_batch_size': 8,
+            'gradient_accumulation_steps': 2,
+            'learning_rate': 1e-6,
+            'weight_decay': 0.1,
+            'warmup_ratio': 0.1,
+            'lr_scheduler_type': 'cosine',
+            
+            'save_strategy': 'steps',
+            'eval_strategy': 'steps',
+            'load_best_model_at_end': True,
+            'metric_for_best_model': 'eval_loss',
+            'greater_is_better': False,
+            'fp16': True,
+            'dataloader_num_workers': 0,
+        }
+        args.update({k: kwargs[k] for k in args if k in kwargs})
+
+        trainingArgs = TrainingArguments(**args)
+        trainer = WeightedTrainer(
+            model=self.model,
+            args=trainingArgs,
+            train_dataset=dataset,
+            eval_dataset=evalDataset,
+            callbacks=[EarlyStoppingCallback(early_stopping_patience=10)]
+        )
+        trainer.train()
 
     @classmethod
-    def trainFromDataset(
+    def trainFromTorchDataset(
         cls,
-        dataset: Dataset,
-        labels: List[int|float],
-        weights: List[float],
+        dataset: TorchDatasetWrapper,
+        evalDataset: TorchDatasetWrapper,
         modelName: str= 'bert-base-uncased',
+        tokenizer: AutoTokenizer | None= None,
         **kwargs
     ):
-        tokenizer = AutoTokenizer.from_pretrained(modelName)
-
-        if not labels:
-            return None
-        if isinstance(labels[0], float):
+        if dataset.regression:
             model = AutoModelForSequenceClassification.from_pretrained(modelName, num_labels=1)
             model.config.problem_type = "regression"
         else:
@@ -116,8 +148,6 @@ class NieBert(ClassifierInterface):
         except Exception:
             pass
 
-        tDataset = TorchDatasetWrapper(dataset, labels, tokenizer, weights)
-        
         args = {
             'output_dir': f"../output/{modelName.replace('/','-')}",
             'logging_steps': 50,
@@ -130,7 +160,8 @@ class NieBert(ClassifierInterface):
             'warmup_ratio': 0.1,
             'lr_scheduler_type': 'cosine',
             
-            'save_strategy': 'no',
+            'save_strategy': 'steps',
+            'eval_strategy': 'steps',
             'load_best_model_at_end': True,
             'metric_for_best_model': 'eval_loss',
             'greater_is_better': False,
@@ -143,27 +174,82 @@ class NieBert(ClassifierInterface):
         trainer = WeightedTrainer(
             model=model,
             args=trainingArgs,
-            train_dataset=tDataset
+            train_dataset=dataset,
+            eval_dataset=evalDataset,
+            callbacks=[EarlyStoppingCallback(early_stopping_patience=10)]
         )
         trainer.train()
 
         this = cls(tokenizer, model)
         return this
 
-    def predict(self, article: Article):
+    @classmethod
+    def trainFromDataset(
+        cls,
+        dataset: Dataset,
+        labels: List[int|float],
+        evalDataset: Dataset,
+        evalLabels: List[int|float],
+        weights: List[float],
+        modelName: str= 'bert-base-uncased',
+        splitAsSentences= False,
+        tokenizer: AutoTokenizer | None= None,
+        **kwargs
+    ):
+        if tokenizer == None:
+            tokenizer = AutoTokenizer.from_pretrained(modelName)
+        tDataset = TorchDatasetWrapper.fromDataset(dataset, labels, tokenizer, weights, splitAsSentences)
+        tEvalDataset = TorchDatasetWrapper.fromDataset(evalDataset, evalLabels, tokenizer, splitAsSentences=splitAsSentences)
+
+        this = cls.trainFromTorchDataset(tDataset, tEvalDataset, modelName, tokenizer, **kwargs)
+        return this
+
+    def predict(self, article: Article, splitAsSentences: bool= False):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(device)
         self.model.eval()
 
-        inputs = self.tokenizer(' '.join(article.content), return_tensors='pt', padding=True, truncation=True, max_length=512)
-        inputs = {k: v.to(device) for k, v in inputs.items()}
+        if splitAsSentences:
+            predictions = []
+            for sentence in article.content:
+                inputs = self.tokenizer(sentence, return_tensors='pt', padding=True, truncation=True, max_length=512)
+                inputs = {k: v.to(device) for k, v in inputs.items()}
+
+                with torch.no_grad():
+                    outputs = self.model(**inputs)
+                    logits = outputs.logits
+                    if logits.shape[1] == 1:
+                        predictions.append(logits.squeeze().item())  # regression
+                    else:
+                        predictions.append(torch.argmax(outputs, dim=1).item()) # classification
+        else:
+            inputs = self.tokenizer(' '.join(article.content), return_tensors='pt', padding=True, truncation=True, max_length=512)
+            inputs = {k: v.to(device) for k, v in inputs.items()}
         
+            with torch.no_grad():
+                outputs = self.model(**inputs)
+                logits = outputs.logits
+                if logits.shape[1] == 1:
+                    predictions = logits.squeeze().item()  # regression
+                else:
+                    predictions = torch.argmax(outputs, dim=1).item() # classification
+        return predictions
+
+    def predictSentence(self, sentence: str):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model.to(device)
+        self.model.eval()
+
+        inputs = self.tokenizer(sentence, return_tensors='pt', padding=True, truncation=True, max_length=512)
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+    
         with torch.no_grad():
             outputs = self.model(**inputs)
-            if outputs.logits.shape[1] == 1:
-                predictions = outputs.logits.squeeze().item()  # regression
+            logits = outputs.logits
+            if logits.shape[1] == 1:
+                predictions = logits.squeeze().item()  # regression
             else:
-                predictions = torch.argmax(outputs.logits, dim=1).item().tolist() # classification
+                predictions = torch.argmax(outputs, dim=1).item() # classification
         return predictions
 
     def save(self, name: str, path=config.nieBERTPath):
