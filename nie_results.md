@@ -130,3 +130,35 @@ Having many epochs does help getting better results, but not consistently.
 For the vector size, increasing it yields generally better results, but not consistently either.
 
 The 200 vecSize and 20 epochs will now be our reference for testing other models.
+
+## BERT
+
+We will now use regression on the B.T. Easiness value, from the CLEAR corpus.
+
+100%|██████████| 1701/1701 [00:36<00:00, 46.36it/s]  
+Error 923.4416349810003, mean error 0.5428816196243388  
+Root Mean Square Error 0.6822279044275928
+
+### Tweaks and weight
+
+Changes were made to use the standard error as weight and learning rate tweaking.
+
+100%|██████████| 1701/1701 [00:21<00:00, 79.93it/s]
+Error 923.0625320810008, mean error 0.542658749018813
+Root Mean Square Error 0.6789603336937857
+
+### Pseudo-labeling
+
+This was achieved by pseudo-labeling the 5 closest sentences (from `external.csv`) to every sentence in the original corpus.
+
+100%|██████████| 1701/1701 [00:22<00:00, 76.89it/s]
+Error 858.7093837890005, mean error 0.5048262103403883
+Root Mean Square Error 0.6368434036818288
+
+### Other try with pseudo-labeling
+
+I tried reducing the number of pseudo-labeled content, and this was the second best, achieved with 3 pseudo-labeled sentences per sentences of the original corpus.
+
+100%|██████████| 1700/1700 [00:16<00:00, 101.65it/s]
+Error 910.1103845250012, mean error 0.535359049720589
+Root Mean Square Error 0.6717810088137365
